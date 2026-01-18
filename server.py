@@ -61,12 +61,14 @@ scaler_path = os.path.join("backend", "model", "scaler.pkl")
 city_le_path = os.path.join("backend", "model", "city_le.pkl")
 eng_le_path = os.path.join("backend", "model", "eng_le.pkl")
 ship_le_path = os.path.join("backend", "model", "ship_le.pkl")
+y_le_path = os.path.join("backend", "model", "y_le.pkl")
 
 model = None
 scaler = None
 city_le = None
 eng_le = None
 ship_le = None
+y_le = None
 
 try:
     model = joblib.load(model_path)
@@ -93,6 +95,9 @@ try:
     if os.path.exists(ship_le_path):
         ship_le = joblib.load(ship_le_path)
         print(f"✓ Membership Type LabelEncoder loaded from {ship_le_path}")
+    if os.path.exists(y_le_path):
+        y_le = joblib.load(y_le_path)
+        print(f"✓ Target LabelEncoder (y_le) loaded from {y_le_path}")
 except Exception as e:
     print(f"Error loading preprocessing artifacts: {e}")
 
@@ -116,6 +121,20 @@ class CustomerData(BaseModel):
 @app.get("/")
 async def read_root():
     return FileResponse("client/index.html", media_type="text/html")
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "model_loaded": model is not None,
+        "scaler_loaded": scaler is not None,
+        "encoders_loaded": {
+            "city": city_le is not None,
+            "gender": eng_le is not None,
+            "membership": ship_le is not None,
+            "target": y_le is not None,
+        }
+    }
 
 @app.get("/index.html")
 async def get_index():
@@ -232,7 +251,12 @@ async def predict(data: CustomerData):
             prediction_value = int(prediction)
 
         # Map to label if possible
-        satisfaction_label = joblib.load("backend\model\y_le.pkl").inverse_transform([prediction_value])[0]
+        satisfaction_label = str(prediction_value)
+        if y_le is not None:
+            try:
+                satisfaction_label = str(y_le.inverse_transform([prediction_value])[0])
+            except Exception as e:
+                print(f"Note: Could not inverse transform target label: {e}")
         
         # Probabilities
         probabilities = None
@@ -250,9 +274,15 @@ async def predict(data: CustomerData):
 
                 if proba is not None:
                     probabilities = proba[0].tolist()
-                    # build label -> percent mapping if possible
-                    labels = [satisfaction_map.get(i, str(i)) for i in range(len(probabilities))]
-                    probability_breakdown = {labels[i]: round(probabilities[i] * 100, 2) for i in range(len(probabilities))}
+                    # build label -> percent mapping using y_le if available
+                    if y_le is not None and hasattr(y_le, 'classes_'):
+                        labels = [str(cls) for cls in y_le.classes_]
+                    else:
+                        labels = [str(i) for i in range(len(probabilities))]
+                    probability_breakdown = {
+                        labels[i]: round(probabilities[i] * 100, 2)
+                        for i in range(min(len(labels), len(probabilities)))
+                    }
         except Exception as e:
             print(f"Note: Could not obtain probabilities: {e}")
 
