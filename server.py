@@ -306,3 +306,24 @@ async def predict(data: CustomerData):
         error_msg = f"Prediction error: {str(e)}"
         print(f"Exception: {traceback.format_exc()}")
         return {"error": error_msg, "prediction": None, "status": "error"}
+
+
+@app.post("/predict/batch")
+async def predict_batch(items: list[CustomerData]):
+    """Batch prediction endpoint for scoring multiple customers concurrently."""
+    if model is None:
+        return {"error": "Model not loaded.", "results": [], "status": "error"}
+
+    if not items:
+        return {"results": [], "count": 0, "status": "success"}
+
+    results = []
+    for item in items:
+        res = await predict(item)
+        results.append(res)
+
+    return {
+        "results": results,
+        "count": len(results),
+        "status": "success"
+    }
